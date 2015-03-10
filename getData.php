@@ -1,12 +1,10 @@
 <?php 
-
 function parseJson($path, $filename)
 {
 #Get json object from each file path
 	$file_path = $path . "/" . $filename . "*";
 	$file = popen("/bin/ls ".$file_path, "r");
 	$jsonobj = array();
-	$out = array();
 
 	while(! feof($file)) {
 		$filepath = trim(fgets($file));
@@ -17,8 +15,13 @@ function parseJson($path, $filename)
 		array_push($jsonobj, json_decode($str, true));
 	}
 	pclose($file);
+	return $jsonobj;
+}
 
+function MergeJsonObj($jsonobj)
+{
 #Merge json object
+	$out = array();
 	foreach ($jsonobj as $el) {
 
 		foreach ($el as $k => $kval) {
@@ -50,15 +53,53 @@ function getValue($jsonstr, $field_name)
 		return 0;
 	}
 }
+function DealTimeHasing($CWorkerObj)
+{
+	$out = $CWorkerObj;
+	foreach ($CWorkerObj as $key=>$el) {
+		$time_client_save_chunk = getValue($el, "IDX_SAVE_FILECHUNK");
+		$time_hashing = getValue($el, "IDX_HASH_BLOCK");
+		$time_serializing = getValue($el, "IDX_BACKUP_DATA_SERIALIZE");
+	
+		if ($time_hashing > 0) {
+			if ($time_client_save_chunk > 0 && $time_hashing > $time_client_save_chunk) { # local backup
+				$time_hashing -= $time_client_save_chunk;
+			}
+			if ($time_hashing > $time_serializing) { # remote backup, for small file backup (no flush happen during chunking)↲
+				$time_hashing -= $time_serializing;
+			}
+			$out[$key]["IDX_HASH_BLOCK"] = $time_hashing;
+			$out[$key]["Save Chunks"] = $time_client_save_chunk;
+		}
+	}	
+	return $out;
+}
+
+function CreateBarChart($barName, $Number)
+{
+	$out = array(array('thread'));
+	for ($i=1; $i <=$Number; $i++)
+		array_push($out,array(strVal($i)));
+	return $out;
+}
+
+function pushBarChartKeyValue(&$bar, $key_new, $key_old, $workerObj)
+{
+	array_push($bar[0], $key_new);
+	foreach ($workerObj as $objindex=>$objArray)
+		array_push($bar[$objindex+1], getValue($objArray, $key_old));
+}
 
 $DataPath = $_GET["datapath"];
-#$DataPath = "713p_firstbkp_4proc_4large1.14G_8mb_2048chunks_net.normal";
+DataPath = "snoopy_1M_8proc_1st";
 
 #read file
-$BController = parseJson($DataPath, "imgbkp_BackupCtrl.profile.json"); 
-$CWorker = parseJson($DataPath, "imgbkp_CWorker.profile.json");
-$SMaster = parseJson($DataPath, "imgbkp_SMaster.profile.json");
-$SWorker = parseJson($DataPath, "imgbkp_SWorker.profile.json");
+$SMaster = MergeJsonObj(parseJson($DataPath, "imgbkp_SMaster.profile.json"));
+$SWorker = MergeJsonObj(parseJson($DataPath, "imgbkp_SWorker.profile.json"));
+$BController = MergeJsonObj(parseJson($DataPath, "imgbkp_BackupCtrl.profile.json")); 
+$CWorkerObj = parseJson($DataPath, "imgbkp_CWorker.profile.json");
+$CWorkerObj = DealTimeHasing($CWorkerObj);
+$CWorker = MergeJsonObj($CWorkerObj);
 
 $Total = getValue($BController, "IDX_BACKUP_TOTAL");
 
@@ -90,28 +131,15 @@ $server_total = getValue($SWorker, "IDX_BACKUP_DATA_DE_SERIALIZE")
 $socket_delay = getValue($CWorker, "IDX_BACKUP_WAIT_SERVER") - $server_total + getValue($SWorker, "IDX_BUFFER_READ");
 
 #Client action's ratio
-$time_client_save_chunk = getValue($CWorker, "IDX_SAVE_FILECHUNK");
-$time_hashing = getValue($CWorker, "IDX_HASH_BLOCK");
-$time_serializing = getValue($CWorker, "IDX_BACKUP_DATA_SERIALIZE");
-
-if ($time_hashing > 0) {
-	if ($time_client_save_chunk > 0 && $time_hashing > $time_client_save_chunk) { # local backup
-		$time_hashing -= $time_client_save_chunk;
-	}
-	if ($time_hashing > $time_serializing) { # remote backup, for small file backup (no flush happen during chunking)
-		$time_hashing -= $time_serializing;
-	}
-}
-
-$client_worker = array(array('Action', 'Seconds'),
+$client_worker =  array(array('Action', 'Seconds'),
 		array('File Stat', getValue($CWorker, "IDX_STAT")),
 		array('File Change Stat', getValue($CWorker, "IDX_GET_CHG_STATUS")), 
 		array('Get Candidate Chunk', getValue($CWorker, "IDX_GET_CANDCHUNK")),
 		array('Read File', getValue($CWorker, "IDX_READ_FILE")),
-		array('Hashing Block', $time_hashing),
+		array('Hashing Block', getValue($CWorker, "IDX_HASH_BLOCK")),
 		array('Move Memory', getValue($CWorker, "IDX_MEM_MOVE")),
 		array('Serialize Backup Data', getValue($CWorker, "IDX_BACKUP_DATA_SERIALIZE")),
-#array('Chunking', getValue($CWorker, "IDX_DO_CHUNK")),	# include IDX_READ_FILE + IDX_MEM_MOVE + IDX_HASH_BLOCK
+#		array('Chunking', getValue($CWorker, "IDX_DO_CHUNK")),	
 		array('Wait for Server', getValue($CWorker, "IDX_BACKUP_WAIT_SERVER")),
 		array('Update Local DB', getValue($CWorker, "IDX_UPDATE_LOCALDB")),
 		array('Queuing Jobs', getValue($CWorker, "IDX_QUEUING_JOB")),
@@ -122,10 +150,35 @@ $client_worker = array(array('Action', 'Seconds'),
 		array('Write Buffer Event', getValue($CWorker, "IDX_BUFFER_WRITE")),
 		array('Protobuf Serialize', getValue($CWorker, "IDX_MSG_SERIALIZE")),
 		array('Available', getValue($CWorker, "IDX_MSG_SERIALIZE")),
-		array('Save Chunks', $time_client_save_chunk),
+		array('Save Chunks', getValue($CWorker, "Save Chunks")),
 		array('Wait for buffer available', getValue($CWorker, "IDX_BACKUP_PIPELINE_BUF_AVAIL_WAIT")),
 		array('Protobuf De-serialize', getValue($CWorker, "IDX_MSG_DE_SERIALIZE")));
 
+$client_worker_thread =  CreateBarChart("tread", count($CWorkerObj));
+pushBarChartKeyValue($client_worker_thread, 'File Stat', "IDX_STAT", $CWorkerObj);
+pushBarChartKeyValue($client_worker_thread, 'File Change Stat', "IDX_GET_CHG_STATUS", $CWorkerObj);
+pushBarChartKeyValue($client_worker_thread, 'Get Candidate Chunk', "IDX_GET_CANDCHUNK", $CWorkerObj);
+pushBarChartKeyValue($client_worker_thread, 'Read File', "IDX_READ_FILE", $CWorkerObj);
+pushBarChartKeyValue($client_worker_thread, 'Hashing Block', "IDX_HASH_BLOCK", $CWorkerObj);
+pushBarChartKeyValue($client_worker_thread, 'Move Memory', "IDX_MEM_MOVE", $CWorkerObj);
+pushBarChartKeyValue($client_worker_thread, 'Serialize Backup Data', "IDX_BACKUP_DATA_SERIALIZE", $CWorkerObj);
+pushBarChartKeyValue($client_worker_thread, 'Wait for Server', "IDX_WAIT_SERVER", $CWorkerObj);
+pushBarChartKeyValue($client_worker_thread, 'Update Local DB', "IDX_UPDATE_LOCALDB", $CWorkerObj);
+pushBarChartKeyValue($client_worker_thread, 'Queuing Jobs', "IDX_QUEUING_JOB", $CWorkerObj);
+pushBarChartKeyValue($client_worker_thread, 'Add file into list', "IDX_ADD_FILE", $CWorkerObj);
+pushBarChartKeyValue($client_worker_thread, 'Add callback', "IDX_ADD_CALLBACK", $CWorkerObj);
+pushBarChartKeyValue($client_worker_thread, 'Open File', "IDX_OPEN_FILE", $CWorkerObj);
+pushBarChartKeyValue($client_worker_thread, 'Read Buffer Event', "IDX_BUFFER_READ", $CWorkerObj);
+pushBarChartKeyValue($client_worker_thread, 'Write Buffer Event', "IDX_BUFFER_WRITE", $CWorkerObj);
+pushBarChartKeyValue($client_worker_thread, 'Protobuf Serialize', "IDX_MSG_SERIALIZE", $CWorkerObj);
+pushBarChartKeyValue($client_worker_thread, 'Available', "IDX_MSG_SERIALIZE", $CWorkerObj);
+pushBarChartKeyValue($client_worker_thread, 'Save chunks', "Save chunks", $CWorkerObj);
+pushBarChartKeyValue($client_worker_thread, 'Wait for buffer available', "IDX_BACKUP_PIPELINE_BUF_AVAIL_WAIT", $CWorkerObj);
+pushBarChartKeyValue($client_worker_thread, 'Protobuf De-serialize', "IDX_MSG_DE_SERIALIZE", $CWorkerObj);
+#print_r($client_worker_thread);
+
+$client_thread_total = CreateBarChart("thread", count($CWorkerObj));
+pushBarChartKeyValue($client_thread_total, "Total Time", "IDX_BACKUP_TOTAL", $CWorkerObj);
 #Client Backup action's ratio
 $client_worker_chunking = array(array('Action', 'Seconds'));
 
@@ -203,11 +256,15 @@ $diagram = array(array('title'=>'Backup Overview', 'value'=>$backup_overview),
 		array('title'=>'Client Controller', 'value'=>$client_controller),
 		array('title'=>'Client Worker', 'value'=>$client_worker),
 		array('title'=>'Server', 'value'=>$server),
-#array('title'=>'Client Worker: Chunking - File Read & Chunking', 'value'=>$client_worker_backup),
+#		array('title'=>'Client Worker: File Read & Chunking', 'value'=>$client_worker_backup),
 		array('title'=>'Client Worker: Dedup Detail - Chunking', 'value'=>$client_worker_chunking),
 		array('title'=>'Client Worker: Dedup Detail - Serialize', 'value'=>$client_worker_serialize));
 
+$barChart = array(array('title'=>'Client Worker Thread', 'isStacked'=>'true', 'value'=>$client_worker_thread),
+			array('title'=>'Client Thread Total Time', 'hAxis'=>array( 'title'=>"Total Population", 'minValue'=> 0), 'value'=>$client_thread_total));
+
 $data = array('diagram'=>$diagram, 
+		'barChart'=>$barChart,
 		'total'=>$total_output, 
 		'worker_total'=>$worker_total_output,
 		'server_total'=>$server_total,

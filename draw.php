@@ -35,6 +35,15 @@
 			var chart = new google.visualization.PieChart(document.getElementById(divID));
 			chart.draw(data, options);
 		}
+		var barChart = jsonData['barChart'];
+		for (i=0;i < barChart.length; i++) {
+			var data = google.visualization.arrayToDataTable(barChart[i].value);
+			var options = { title: barChart[i].title, isStacked: barChart[i].isStacked, hAxis: barChart[i].hAxis};
+			var divID = 'barchart' + i;
+
+			var chart = new google.visualization.BarChart(document.getElementById(divID));
+			chart.draw(data, options);
+		}
 
 	}
 </script>
@@ -61,9 +70,10 @@ Unknown Time: <font color="red"><b id="unknown_time">waiting...</b></font>
 <td> <div id="piechart5" style="width: 700px; height: 400px;"></div> </td>
 </tr>
 <tr>
-<td> <div id="piechart6" style="width: 700px; height: 400px;"></div> </td>
-<td> <div id="piechart7" style="width: 700px; height: 400px;"></div> </td>
+<td> <div id="barchart0" style="width: 700px; height: 400px;"></div> </td>
+<td> <div id="barchart1" style="width: 700px; height: 400px;"></div> </td>
 </tr>
+
 </table>
 
 </body>
