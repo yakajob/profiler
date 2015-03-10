@@ -1,0 +1,7 @@
+Quick Start:
+
+1. put the PHP code in /volume1/web.
+2. index.php would list all links of each dir under /volume1/web.
+3. draw.php would draw pie by google chart.
+4. getData.php would collect/caculate data under specified dir.
+
